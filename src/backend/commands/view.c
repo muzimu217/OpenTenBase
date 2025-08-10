@@ -73,7 +73,7 @@ validateWithCheckOption(char *value)
  */
 static ObjectAddress
 DefineVirtualRelation(RangeVar *relation, List *tlist, bool replace,
-                      List *options, Query *viewParse)
+                      List *options, Query *viewParse, bool force)
 {// #lizard forgives
     Oid            viewOid;
     LOCKMODE    lockmode;
@@ -210,7 +210,7 @@ DefineVirtualRelation(RangeVar *relation, List *tlist, bool replace,
          * the new view be automatically updatable, but the old view may not
          * have been).
          */
-        StoreViewQuery(viewOid, viewParse, replace);
+        StoreViewQuery(viewOid, viewParse, replace, force);
 
         /* Make the new view query visible */
         CommandCounterIncrement();
@@ -268,7 +268,7 @@ DefineVirtualRelation(RangeVar *relation, List *tlist, bool replace,
         CommandCounterIncrement();
 
         /* Store the query for the view */
-        StoreViewQuery(address.objectId, viewParse, replace);
+        StoreViewQuery(address.objectId, viewParse, replace, force);
 
         return address;
     }
@@ -330,7 +330,7 @@ checkViewTupleDesc(TupleDesc newdesc, TupleDesc olddesc)
 }
 
 static void
-DefineViewRules(Oid viewOid, Query *viewParse, bool replace)
+DefineViewRules(Oid viewOid, Query *viewParse, bool replace, bool force)
 {
     /*
      * Set up the ON SELECT rule.  Since the query has already been through
@@ -342,7 +342,8 @@ DefineViewRules(Oid viewOid, Query *viewParse, bool replace)
                        CMD_SELECT,
                        true,
                        replace,
-                       list_make1(viewParse));
+                       list_make1(viewParse),
+                       force);
 
     /*
      * Someday: automatic ON INSERT, etc
@@ -425,7 +426,7 @@ UpdateRangeTableOfViewParse(Oid viewOid, Query *viewParse)
  */
 Query *
 MakeViewParse(ViewStmt* stmt, const char* query_string,
-           int stmt_location, int stmt_len)
+           int stmt_location, int stmt_len, bool force)
 {
 	Query	*viewParse = NULL;
     RawStmt    *rawstmt;
@@ -437,7 +438,7 @@ MakeViewParse(ViewStmt* stmt, const char* query_string,
     rawstmt->stmt = (Node *) copyObject(stmt->query);
     rawstmt->stmt_location = stmt_location;
     rawstmt->stmt_len = stmt_len;
-	viewParse = parse_analyze(rawstmt, query_string, NULL, 0, NULL);
+	viewParse = parse_analyze(rawstmt, query_string, NULL, 0, NULL, force);
 	return viewParse;
 }
 
@@ -457,7 +458,7 @@ IsViewTemp(ViewStmt* stmt, const char* query_string,
 
 	/* don't corrupt original command */
     view = (RangeVar*)copyObject(stmt->view);
-	viewParse = MakeViewParse(stmt, query_string, stmt_location, stmt_len);
+	viewParse = MakeViewParse(stmt, query_string, stmt_location, stmt_len, false);
 
     /*
      * If the user didn't explicitly ask for a temporary view, check whether
@@ -489,7 +490,7 @@ DefineView(ViewStmt *stmt, const char *queryString,
 	bool		check_option;
 	ObjectAddress address;
 
-	viewParse = MakeViewParse(stmt, queryString, stmt_location, stmt_len);
+	viewParse = MakeViewParse(stmt, queryString, stmt_location, stmt_len, stmt->force);
     /*
      * The grammar should ensure that the result is a single SELECT Query.
      * However, it doesn't forbid SELECT INTO, so we have to check for that.
@@ -547,14 +548,17 @@ DefineView(ViewStmt *stmt, const char *queryString,
      */
     if (check_option)
     {
-        const char *view_updatable_error =
-        view_query_is_auto_updatable(viewParse, true);
+        if (!stmt->force)
+        {
+            const char *view_updatable_error =
+            view_query_is_auto_updatable(viewParse, true);
 
-        if (view_updatable_error)
-            ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                     errmsg("WITH CHECK OPTION is supported only on automatically updatable views"),
-                     errhint("%s", view_updatable_error)));
+            if (view_updatable_error)
+                ereport(ERROR,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                         errmsg("WITH CHECK OPTION is supported only on automatically updatable views"),
+                         errhint("%s", view_updatable_error)));
+        }
     }
 
     /*
@@ -623,7 +627,8 @@ DefineView(ViewStmt *stmt, const char *queryString,
      * aborted.
      */
     address = DefineVirtualRelation(view, viewParse->targetList,
-                                    stmt->replace, stmt->options, viewParse);
+                                    stmt->replace, stmt->options, viewParse, 
+                                    stmt->force);
 
     return address;
 }
@@ -632,7 +637,7 @@ DefineView(ViewStmt *stmt, const char *queryString,
  * Use the rules system to store the query for the view.
  */
 void
-StoreViewQuery(Oid viewOid, Query *viewParse, bool replace)
+StoreViewQuery(Oid viewOid, Query *viewParse, bool replace, bool force)
 {
     /*
      * The range table of 'viewParse' does not contain entries for the "OLD"
@@ -643,5 +648,5 @@ StoreViewQuery(Oid viewOid, Query *viewParse, bool replace)
     /*
      * Now create the rules associated with the view.
      */
-    DefineViewRules(viewOid, viewParse, replace);
+    DefineViewRules(viewOid, viewParse, replace, force);
 }
