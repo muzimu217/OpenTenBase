@@ -2743,6 +2743,15 @@ expandRelAttrs(ParseState *pstate, RangeTblEntry *rte,
                *var;
     List       *te_list = NIL;
 
+    if (creating_force_view && rte->rtekind == RTE_RELATION && !OidIsValid(rte->relid))
+    {
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("CREATE FORCE VIEW does not support \"*\" for relations that do not exist"),
+                 errhint("Please explicitly list the column names in the SELECT statement."),
+                 parser_errposition(pstate, location)));
+    }
+
     expandRTE(rte, rtindex, sublevels_up, location, false,
               &names, &vars);
 
@@ -2827,6 +2836,14 @@ void
 get_rte_attribute_type(RangeTblEntry *rte, AttrNumber attnum,
                        Oid *vartype, int32 *vartypmod, Oid *varcollid)
 {// #lizard forgives
+    if (creating_force_view && rte->rtekind == RTE_RELATION && !OidIsValid(rte->relid))
+    {
+        *vartype = UNKNOWNOID;
+        *vartypmod = -1;
+        *varcollid = InvalidOid;
+        return;
+    }
+
     switch (rte->rtekind)
     {
         case RTE_RELATION:
