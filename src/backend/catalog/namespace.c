@@ -54,6 +54,7 @@
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "parser/parse_func.h"
+#include "parser/parser.h"
 #include "storage/ipc.h"
 #include "storage/lmgr.h"
 #ifdef XCP
@@ -418,6 +419,11 @@ RangeVarGetRelidExtended(const RangeVar *relation, LOCKMODE lockmode,
          */
         retry = true;
         oldRelId = relId;
+    }
+
+    if (!OidIsValid(relId) && creating_force_view)
+    {
+        return InvalidOid;
     }
 
     if (!OidIsValid(relId) && !missing_ok)

@@ -191,7 +191,7 @@ InsertRule(char *rulname,
  *        Execute a CREATE RULE command.
  */
 ObjectAddress
-DefineRule(RuleStmt *stmt, const char *queryString)
+DefineRule(RuleStmt *stmt, const char *queryString, bool force)
 {
     List       *actions;
     Node       *whereClause;
@@ -213,7 +213,8 @@ DefineRule(RuleStmt *stmt, const char *queryString)
                               stmt->event,
                               stmt->instead,
                               stmt->replace,
-                              actions);
+                              actions, 
+                              force);
 }
 
 
@@ -231,7 +232,8 @@ DefineQueryRewrite(char *rulename,
                    CmdType event_type,
                    bool is_instead,
                    bool replace,
-                   List *action)
+                   List *action, 
+                   bool force)
 {// #lizard forgives
     Relation    event_relation;
     ListCell   *l;

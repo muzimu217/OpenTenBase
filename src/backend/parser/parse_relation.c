@@ -15,6 +15,7 @@
  *
  *-------------------------------------------------------------------------
  */
+#include "parser/parser.h"
 #include "postgres.h"
 
 #include <ctype.h>
@@ -31,7 +32,9 @@
 #include "parser/parse_enr.h"
 #include "parser/parse_relation.h"
 #include "parser/parse_type.h"
+#include "parser/parser.h"
 #include "utils/builtins.h"
+#include "utils/elog.h"
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
 #include "utils/syscache.h"
@@ -1247,7 +1250,7 @@ addRangeTableEntry(ParseState *pstate,
     RangeTblEntry *rte = makeNode(RangeTblEntry);
     char       *refname = alias ? alias->aliasname : relation->relname;
     LOCKMODE    lockmode;
-    Relation    rel;
+    Relation    rel = NULL;
 
     Assert(pstate != NULL);
 
@@ -1317,30 +1320,58 @@ addRangeTableEntry(ParseState *pstate,
     }
 #endif
 
-    /*
-     * Get the rel's OID.  This access also ensures that we have an up-to-date
-     * relcache entry for the rel.  Since this is typically the first access
-     * to a rel in a statement, be careful to get the right access level
-     * depending on whether we're doing SELECT FOR UPDATE/SHARE.
-     */
-    lockmode = isLockedRefname(pstate, refname) ? RowShareLock : AccessShareLock;
-    rel = parserOpenTable(pstate, relation, lockmode);
-    rte->relid = RelationGetRelid(rel);
-    rte->relkind = rel->rd_rel->relkind;
+    PG_TRY();
+    {
+        /*
+         * Get the rel's OID.  This access also ensures that we have an up-to-date
+         * relcache entry for the rel.  Since this is typically the first access
+         * to a rel in a statement, be careful to get the right access level
+         * depending on whether we're doing SELECT FOR UPDATE/SHARE.
+         */
+        lockmode = isLockedRefname(pstate, refname) ? RowShareLock : AccessShareLock;
+        rel = parserOpenTable(pstate, relation, lockmode);
+    }
+    PG_CATCH();
+    {
+        if (creating_force_view && geterrcode() == ERRCODE_UNDEFINED_TABLE)
+        {
+            FlushErrorState();
+            rel = NULL;
+        }
+        else
+        {
+            PG_RE_THROW(); 
+        }
+    }
+    PG_END_TRY();
 
-    /*
-     * Build the list of effective column names using user-supplied aliases
-     * and/or actual column names.
-     */
-    rte->eref = makeAlias(refname, NIL);
-    buildRelationAliases(rel->rd_att, alias, rte->eref);
+    if (rel == NULL)
+    {
+        Assert(creating_force_view);
+        rte->relid = RelationGetRelid(rel);
+        rte->relkind = rel->rd_rel->relkind;
 
-    /*
-     * Drop the rel refcount, but keep the access lock till end of transaction
-     * so that the table can't be deleted or have its schema modified
-     * underneath us.
-     */
-    heap_close(rel, NoLock);
+        /*
+         * Build the list of effective column names using user-supplied aliases
+         * and/or actual column names.
+         */
+        rte->eref = makeAlias(refname, NIL);
+    }
+    else
+    {
+        rte->relid = RelationGetRelid(rel);
+        rte->relkind = rel->rd_rel->relkind;
+        rte->eref = makeAlias(refname, NIL);
+        buildRelationAliases(rel->rd_att, alias, rte->eref);
+
+        /*
+         * Drop the rel refcount, but keep the access lock till end of transaction
+         * so that the table can't be deleted or have its schema modified
+         * underneath us.
+         */
+        heap_close(rel, NoLock);
+    }
+
 
     /*
      * Set flags and access permissions.
