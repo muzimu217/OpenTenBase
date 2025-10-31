@@ -23,7 +23,7 @@
 #define RULE_FIRES_ON_REPLICA    'R'
 #define RULE_DISABLED            'D'
 
-extern ObjectAddress DefineRule(RuleStmt *stmt, const char *queryString);
+extern ObjectAddress DefineRule(RuleStmt *stmt, const char *queryString, bool force);
 
 extern ObjectAddress DefineQueryRewrite(char *rulename,
                    Oid event_relid,
@@ -31,7 +31,8 @@ extern ObjectAddress DefineQueryRewrite(char *rulename,
                    CmdType event_type,
                    bool is_instead,
                    bool replace,
-                   List *action);
+                   List *action, 
+                   bool force);
 
 extern ObjectAddress RenameRewriteRule(RangeVar *relation, const char *oldName,
                   const char *newName);

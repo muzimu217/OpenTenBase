@@ -344,6 +344,8 @@ pgxc_FQS_datanodes_for_rtr(Index varno, Query *query)
     {
         case RTE_RELATION:
         {
+            if (!OidIsValid(rte->relid))
+                return NULL;
             /* For anything, other than a table, we can't find the datanodes */
 #ifdef __OPENTENBASE__
 			if (rte->relkind != RELKIND_RELATION &&

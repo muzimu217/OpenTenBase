@@ -3206,6 +3206,7 @@ typedef struct ViewStmt
     bool        replace;        /* replace an existing view? */
     List       *options;        /* options from WITH clause */
     ViewCheckOption withCheckOption;    /* WITH CHECK OPTION */
+    bool        force;
 } ViewStmt;
 
 /* ----------------------

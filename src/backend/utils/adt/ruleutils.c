@@ -3895,7 +3895,7 @@ set_relation_column_names(deparse_namespace *dpns, RangeTblEntry *rte,
      * get_rte_attribute_name, except that it's important to disregard dropped
      * columns.  We put NULL into the array for a dropped column.
      */
-    if (rte->rtekind == RTE_RELATION)
+    if (rte->rtekind == RTE_RELATION && OidIsValid(rte->relid))
     {
         /* Relation --- look to the system catalogs for up-to-date info */
         Relation    rel;
@@ -10502,10 +10502,20 @@ get_from_clause_item(Node *jtnode, Query *query, deparse_context *context)
         {
             case RTE_RELATION:
                 /* Normal relation RTE */
-                appendStringInfo(buf, "%s%s",
-                                 only_marker(rte),
-                                 generate_relation_name(rte->relid,
-                                                        context->namespaces));
+                if (!OidIsValid(rte->relid))
+                {
+                    appendStringInfo(buf, "%s%s",
+                                     only_marker(rte),
+                                     quote_identifier(rte->eref->aliasname));
+                }
+                else
+                {
+                    /* Normal relation RTE */
+                    appendStringInfo(buf, "%s%s",
+                                     only_marker(rte),
+                                     generate_relation_name(rte->relid,
+                                                            context->namespaces));
+                }
 #ifdef __OPENTENBASE__
                 /* print for default partition */
                 if (rte->intervalparent && rte->isdefault)
@@ -10650,13 +10660,16 @@ get_from_clause_item(Node *jtnode, Query *query, deparse_context *context)
         }
         else if (rte->rtekind == RTE_RELATION)
         {
-            /*
-             * No need to print alias if it's same as relation name (this
-             * would normally be the case, but not if set_rtable_names had to
-             * resolve a conflict).
-             */
-            if (strcmp(refname, get_relation_name(rte->relid)) != 0)
-                printalias = true;
+            if (OidIsValid(rte->relid))
+            {
+                /*
+                 * No need to print alias if it's same as relation name (this
+                 * would normally be the case, but not if set_rtable_names had to
+                 * resolve a conflict).
+                 */
+                if (strcmp(refname, get_relation_name(rte->relid)) != 0)
+                    printalias = true;
+            }
         }
 #ifdef PGXC
 		else if (rte->rtekind == RTE_SUBQUERY && rte->eref->aliasname)

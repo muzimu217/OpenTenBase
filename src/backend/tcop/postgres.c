@@ -885,7 +885,7 @@ pg_analyze_and_rewrite(RawStmt *parsetree, const char *query_string,
         ResetUsage();
 
     query = parse_analyze(parsetree, query_string, paramTypes, numParams,
-                          queryEnv);
+                          queryEnv, false);
 
     if (log_parser_stats)
         ShowUsage("PARSE ANALYSIS STATISTICS");

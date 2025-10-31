@@ -4817,7 +4817,7 @@ ProcessUtilitySlow(ParseState *pstate,
                 break;
 
             case T_RuleStmt:    /* CREATE RULE */
-                address = DefineRule((RuleStmt *) parsetree, queryString);
+                address = DefineRule((RuleStmt *) parsetree, queryString, false);
                 break;
 
 			case T_CreateSeqStmt:

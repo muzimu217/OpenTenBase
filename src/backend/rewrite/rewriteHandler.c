@@ -175,7 +175,8 @@ AcquireRewriteLocks(Query *parsetree,
         switch (rte->rtekind)
         {
             case RTE_RELATION:
-
+                if (!OidIsValid(rte->relid))
+                    break;
                 /*
                  * Grab the appropriate lock type for the relation, and do not
                  * release it until end of transaction. This protects the
@@ -1874,6 +1875,8 @@ fireRIRrules(Query *parsetree, List *activeRIRs, bool forUpdatePushedDown)
             rt_index != origResultRelation)
             continue;
 
+        if (!OidIsValid(rte->relid))
+            continue;
         /*
          * We can use NoLock here since either the parser or
          * AcquireRewriteLocks should have locked the rel already.
@@ -1985,7 +1988,9 @@ fireRIRrules(Query *parsetree, List *activeRIRs, bool forUpdatePushedDown)
             (rte->relkind != RELKIND_RELATION &&
              rte->relkind != RELKIND_PARTITIONED_TABLE))
             continue;
-
+            
+        if (!OidIsValid(rte->relid))
+            continue;
         rel = heap_open(rte->relid, NoLock);
 
         /*

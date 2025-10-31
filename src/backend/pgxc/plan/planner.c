@@ -176,6 +176,8 @@ contains_temp_tables(List *rtable)
 
         if (rte->rtekind == RTE_RELATION)
         {
+            if (!OidIsValid(rte->relid))
+                continue;
             if (IsTempTable(rte->relid))
                 return true;
         }

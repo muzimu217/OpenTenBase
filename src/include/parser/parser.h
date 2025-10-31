@@ -18,6 +18,7 @@
 #ifndef PARSER_H
 #define PARSER_H
 
+#include "postgres.h" 
 #include "nodes/parsenodes.h"
 
 
@@ -32,7 +33,7 @@ typedef enum
 extern int    backslash_quote;
 extern bool escape_string_warning;
 extern PGDLLIMPORT bool standard_conforming_strings;
-
+extern bool creating_force_view;
 
 /* Primary entry point for the raw parsing functions */
 extern List *raw_parser(const char *str);

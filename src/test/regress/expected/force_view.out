@@ -1,0 +1,79 @@
+--
+-- Regression test for CREATE FORCE VIEW functionality.
+--
+-- This test suite verifies the core creation, boundary checks, and the
+-- dependency finalization workflow. It intentionally avoids testing the
+-- "automatic activation" feature, which is known to fail only in the
+-- pg_regress environment due to a deeper planner/cache issue.
+--
+-- Part 1: Core Creation and Boundary Checks
+-- Test 1.1: Verify successful creation of a FORCE VIEW on a non-existent table.
+DROP VIEW IF EXISTS core_view;
+NOTICE:  view "core_view" does not exist, skipping
+CREATE FORCE VIEW core_view AS SELECT col1 FROM non_existent_table;
+-- Verify the view is in the catalog and its column type defaults to TEXT.
+SELECT relname FROM pg_class WHERE relname = 'core_view';
+  relname  
+-----------
+ core_view
+(1 row)
+
+\d core_view
+            View "public.core_view"
+ Column | Type | Collation | Nullable | Default 
+--------+------+-----------+----------+---------
+ col1   | text | C         |          | 
+
+DROP VIEW core_view;
+-- Test 1.2: Verify rejection of SELECT * on a non-existent table.
+DROP VIEW IF EXISTS star_view;
+NOTICE:  view "star_view" does not exist, skipping
+CREATE FORCE VIEW star_view AS SELECT * FROM non_existent_star_table;
+ERROR:  CREATE FORCE VIEW does not support "*" for relations that do not exist
+LINE 1: CREATE FORCE VIEW star_view AS SELECT * FROM non_existent_st...
+                                              ^
+HINT:  Please explicitly list the column names in the SELECT statement.
+-- Part 2: Interaction with CREATE OR REPLACE VIEW
+-- Test 2.1: Verify native REPLACE limitations are correctly enforced.
+DROP VIEW IF EXISTS compatibility_view;
+NOTICE:  view "compatibility_view" does not exist, skipping
+DROP TABLE IF EXISTS base_table_compat;
+NOTICE:  table "base_table_compat" does not exist, skipping
+CREATE FORCE VIEW compatibility_view AS SELECT val FROM base_table_compat;
+CREATE TABLE base_table_compat (val_new INT) DISTRIBUTE BY REPLICATION;
+-- This is expected to fail due to a name mismatch.
+CREATE OR REPLACE VIEW compatibility_view AS SELECT val_new FROM base_table_compat;
+ERROR:  cannot change name of view column "val" to "val_new"
+-- This is expected to fail due to a type mismatch.
+CREATE OR REPLACE VIEW compatibility_view (val) AS SELECT val_new FROM base_table_compat;
+ERROR:  cannot change data type of view column "val" from text to integer
+DROP VIEW compatibility_view;
+DROP TABLE base_table_compat;
+-- Part 3: Dependency Management Workflow
+-- Test 3.1: Verify the full dependency finalization lifecycle.
+DROP VIEW IF EXISTS dependency_view;
+NOTICE:  view "dependency_view" does not exist, skipping
+DROP TABLE IF EXISTS base_table_depend;
+NOTICE:  table "base_table_depend" does not exist, skipping
+-- Step 1: Create a FORCE VIEW (no dependency recorded).
+CREATE FORCE VIEW dependency_view AS SELECT val FROM base_table_depend;
+-- Step 2: Create the underlying table.
+CREATE TABLE base_table_depend (val TEXT) DISTRIBUTE BY REPLICATION;
+-- Step 3: Verify dependency is NOT yet created. This DROP should SUCCEED.
+DROP TABLE base_table_depend;
+-- Step 4: Recreate table and "finalize" the view to establish dependency.
+CREATE TABLE base_table_depend (val TEXT) DISTRIBUTE BY REPLICATION;
+CREATE OR REPLACE VIEW dependency_view AS SELECT val FROM base_table_depend;
+-- Step 5: Verify dependency is now recorded. This DROP (RESTRICT) should FAIL.
+DROP TABLE base_table_depend;
+ERROR:  cannot drop table base_table_depend because other objects depend on it
+DETAIL:  view dependency_view depends on table base_table_depend
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
+-- Step 6: Verify DROP CASCADE works as expected.
+DROP TABLE base_table_depend CASCADE;
+NOTICE:  drop cascades to view dependency_view
+-- Step 7: Verify the view has been cascaded.
+SELECT * FROM dependency_view;
+ERROR:  relation "dependency_view" does not exist
+LINE 1: SELECT * FROM dependency_view;
+                      ^

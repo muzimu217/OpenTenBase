@@ -28,6 +28,7 @@
 #include "catalog/pg_constraint_fn.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
+#include "catalog/namespace.h"
 #include "executor/executor.h"
 #include "executor/nodeAgg.h"
 #include "foreign/fdwapi.h"
@@ -655,7 +656,32 @@ subquery_planner(PlannerGlobal *glob, Query *parse,
 		root->wt_param_id = -1;
 	root->non_recursive_path = NULL;
 	root->partColsUpdated = false;
+    if (parse->rtable)
+    {
+        ListCell *l;
+        foreach(l, parse->rtable)
+        {
+            RangeTblEntry *rte = (RangeTblEntry *) lfirst(l);
 
+            if (rte->rtekind == RTE_RELATION && !OidIsValid(rte->relid) && rte->eref)
+            {
+                Oid real_relid;
+                
+                /* This is a placeholder. Try to find the real relation OID now. */
+                real_relid = RangeVarGetRelid(
+                                 makeRangeVarFromNameList(list_make1(makeString(rte->eref->aliasname))),
+                                 AccessShareLock, 
+                                 true);
+
+                if (OidIsValid(real_relid))
+                {
+                    /* We found it! Heal the RTE. */
+                    rte->relid = real_relid;
+                    rte->relkind = get_rel_relkind(real_relid);
+                }
+            }
+        }
+    }
 	/*
 	 * If there is a WITH list, process each WITH query and either convert it
 	 * to RTE_SUBQUERY RTE(s) or build an initplan SubPlan structure for it.

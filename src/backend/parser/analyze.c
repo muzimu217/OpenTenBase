@@ -56,6 +56,8 @@
 #include "parser/parse_relation.h"
 #include "parser/parse_target.h"
 #include "parser/parsetree.h"
+#include "parser/parser.h"
+
 #ifdef _MLS_
 #include "postmaster/postmaster.h"
 #endif
@@ -86,6 +88,7 @@
 #include "utils/memutils.h"
 #endif
 
+bool creating_force_view = false;
 
 #ifdef __OPENTENBASE__
 /* GUC to enable transform insert into multi-values to copy from */
@@ -145,10 +148,11 @@ static bool test_raw_expression_coverage(Node *node, void *context);
 Query *
 parse_analyze(RawStmt *parseTree, const char *sourceText,
               Oid *paramTypes, int numParams,
-              QueryEnvironment *queryEnv)
+              QueryEnvironment *queryEnv, bool force)
 {
     ParseState *pstate = make_parsestate(NULL);
     Query       *query;
+    bool        save_creating_force_view;
 
     Assert(sourceText != NULL); /* required as of 8.4 */
 
@@ -159,7 +163,20 @@ parse_analyze(RawStmt *parseTree, const char *sourceText,
 
     pstate->p_queryEnv = queryEnv;
 
-    query = transformTopLevelStmt(pstate, parseTree);
+    save_creating_force_view = creating_force_view;
+    creating_force_view = force;
+    PG_TRY();
+    {
+        query = transformTopLevelStmt(pstate, parseTree);
+        creating_force_view = save_creating_force_view;
+    }
+    PG_CATCH();
+    {
+        creating_force_view = save_creating_force_view;
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+
 
     if (post_parse_analyze_hook)
         (*post_parse_analyze_hook) (pstate, query);
