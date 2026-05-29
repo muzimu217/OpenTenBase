@@ -49,7 +49,10 @@ and( a.relname like 'opentenbase_subscription%' or  a.relname like 'OPENTENBASE_
  opentenbase_subscription_parallel | xmax_gts
  opentenbase_subscription_parallel | xmin
  opentenbase_subscription_parallel | xmin_gts
-(44 rows)
+ opentenbase_subscription_parallel_sub_child_idx | sub_child
+ opentenbase_subscription_parallel_sub_parent_idx | sub_parent
+ opentenbase_subscription_sub_name_idx | sub_name
+(47 rows)
 
 select * from opentenbase_subscription;
  OID | SUB_NAME | SUB_IGNORE_PK_CONFLICT | SUB_PARALLEL_NUMBER | SUB_IS_ALL_ACTIVED 
@@ -112,7 +115,10 @@ and( a.relname like 'opentenbase_subscription%' or  a.relname like 'OPENTENBASE_
  opentenbase_subscription_parallel | xmax_gts
  opentenbase_subscription_parallel | xmin
  opentenbase_subscription_parallel | xmin_gts
-(44 rows)
+ opentenbase_subscription_parallel_sub_child_idx | sub_child
+ opentenbase_subscription_parallel_sub_parent_idx | sub_parent
+ opentenbase_subscription_sub_name_idx | sub_name
+(47 rows)
 
 select * from opentenbase_subscription;
  sub_name | sub_ignore_pk_conflict | sub_parallel_number | sub_is_all_actived 

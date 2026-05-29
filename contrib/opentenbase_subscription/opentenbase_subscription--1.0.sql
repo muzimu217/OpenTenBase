@@ -16,6 +16,9 @@ CREATE TABLE "opentenbase_subscription"
 												-- the first opentenbase-sub-subscription.
 ) WITH OIDS;
 
+CREATE UNIQUE INDEX "opentenbase_subscription_sub_name_idx"
+	ON "opentenbase_subscription" ("sub_name");
+
 CREATE TABLE "opentenbase_subscription_parallel"
 (
 	"sub_parent"				oid,				-- Oid of parent opentenbase subsription stored in opentenbase_subscription above
@@ -27,6 +30,12 @@ CREATE TABLE "opentenbase_subscription_parallel"
 	"sub_active_lsn"			pg_lsn				-- The LSN value that was set when the current opentenbase-sub-subscription was activated by the first
 												-- opentenbase-sub-subscription, valid only when sub_index > 0
 ) WITH OIDS;
+
+CREATE INDEX "opentenbase_subscription_parallel_sub_parent_idx"
+	ON "opentenbase_subscription_parallel" ("sub_parent");
+
+CREATE UNIQUE INDEX "opentenbase_subscription_parallel_sub_child_idx"
+	ON "opentenbase_subscription_parallel" ("sub_child");
 
 CREATE VIEW "OPENTENBASE_SUBSCRIPTION" AS
 SELECT
