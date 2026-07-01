@@ -1,6 +1,6 @@
 # OpenTenBase 基准性能测试方案
 
-> **Issue**: [#202 — OpenTenBase 基准性能测试方案设计](https://github.com/OpenTenBase/OpenTenBase/issues/202)
+> **Issue**: [#202 — OpenTenBase 基准性能测试方案设计与 AI 辅助分析](https://github.com/OpenTenBase/OpenTenBase/issues/202)
 > **认领者**: @muzimu217
 
 ---
@@ -205,7 +205,33 @@ tps = 214.264685 (without initial connection time)
 
 ---
 
-## 七、参考资料
+## 七、AI 使用策略报告
+
+### AI 工具使用说明
+
+| 阶段 | AI 工具 | 使用方式 | AI 输出验证 |
+|------|---------|----------|-------------|
+| 方案设计 | WorkBuddy MVP 开发专家团 | 多角色协作：PM 分析需求 → 架构师设计测试框架 → 前端生成脚本 | 逐行审查 SQL 语法，对照 OpenTenBase DISTRIBUTE 语法验证 |
+| SQL 脚本编写 | WorkBuddy (Craft 模式) | 生成 benchmark SQL 脚本 | 在 OpenTenBase 源码中交叉验证 LOCATOR_TYPE 定义、pgxc 模块兼容性 |
+| pgbench 脚本 | WorkBuddy (Craft 模式) | 生成自定义 pgbench 测试脚本 | 对照 pgbench 官方文档验证脚本语法 |
+| 分析框架 | WorkBuddy (Plan 模式) | 设计瓶颈判断矩阵 | 基于源码中的 pgxc/locator/planner 模块验证分析逻辑 |
+
+### AI 输出审查与纠错
+
+1. **SQL DISTRIBUTE 语法** — AI 初版使用了 `DISTRIBUTE BY` 语法，对照 OpenTenBase 源码 `src/include/pgxc/locator.h` 中 `LOCATOR_TYPE_*` 定义，确认 Hash/Replication/Modulo/Shard 均为合法分布方式
+2. **pgbench 自定义脚本变量** — AI 生成的 `\set` 变量语法经过 `src/bin/pgbench/pgbench.h` 中的 `PgBenchFunction` 定义交叉验证
+3. **查询计划分析** — 瓶颈判断矩阵基于 `src/backend/pgxc/plan/planner.c` 和 `src/backend/pgxc/locator/redistrib.c` 的实际分发逻辑设计，而非通用 PostgreSQL 知识
+4. **拒绝的 AI 建议** — AI 曾建议使用 `DISTRIBUTE BY ROUND_ROBIN`，但源码中 LOCATOR_TYPE_RROBIN ('N') 已标记为遗留类型，改为使用 MODULO
+
+---
+
+## 八、声明
+
+本测试方案的开发过程中使用了 WorkBuddy MVP 开发专家团（7 位专域角色 + SOP 流程）进行协作。善用 AI 专家团队可以显著缩短从需求理解到可交付方案的路径。
+
+---
+
+## 九、参考资料
 
 - OpenTenBase DISTRIBUTE 语法：源码 `src/include/pgxc/locator.h` 中 `LOCATOR_TYPE_*` 定义
 - pgxc 查询计划分发逻辑：`src/backend/pgxc/plan/planner.c`
