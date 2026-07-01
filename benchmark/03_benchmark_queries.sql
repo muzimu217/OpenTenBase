@@ -141,4 +141,58 @@ SELECT node_name, COUNT(*) FROM bench_modulo_products GROUP BY node_name;
 \echo 'Q19: Shard 分布 — 各 DN 行数'
 SELECT node_name, COUNT(*) FROM bench_shard_transactions GROUP BY node_name;
 
-\echo '✅ Benchmark queries complete. See 04_pgbench_scripts.sh for concurrency tests.'
+-- ============================================================
+-- 五、分布式事务 (2PC) 基准
+-- ============================================================
+\echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
+\echo '📌 五、分布式事务 (2PC) 基准'
+\echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
+
+-- 5.1 跨 DN 事务：Hash × Shard 双表写入 (2PC)
+-- 涉及不同 DN 的事务需要 GTM 协调两阶段提交
+\echo 'Q20: 跨 DN 2PC 事务 (Hash + Shard 双表写入)'
+BEGIN;
+INSERT INTO bench_hash_orders (order_id, customer_id, product_id, quantity, price, order_date, status, region)
+VALUES (99990001, 9999, 999, 1, 100.00, NOW()::DATE, 'pending', 'Shanghai');
+INSERT INTO bench_shard_transactions (txn_id, account_id, amount, txn_type, created_at)
+VALUES (99990001, 9999, -100.00, 'withdrawal', NOW());
+COMMIT;
+
+-- 查看事务提交统计
+\echo 'Q20-follow: 事务统计 (pgxc_stat_activity)'
+SELECT node_name, xact_commit, xact_rollback FROM pgxc_stat_activity WHERE datname = current_database();
+
+-- 5.2 跨 DN 事务回滚：验证 2PC 原子性
+\echo 'Q21: 跨 DN 2PC 回滚 (原子性验证)'
+BEGIN;
+INSERT INTO bench_hash_orders (order_id, customer_id, product_id, quantity, price, order_date, status, region)
+VALUES (99990002, 9999, 999, 2, 200.00, NOW()::DATE, 'pending', 'Shanghai');
+INSERT INTO bench_shard_transactions (txn_id, account_id, amount, txn_type, created_at)
+VALUES (99990002, 9999, -200.00, 'withdrawal', NOW());
+ROLLBACK;
+
+-- 验证回滚成功（以上两条记录不应存在）
+\echo 'Q21-verify: 回滚验证'
+SELECT COUNT(*) AS should_be_zero FROM bench_hash_orders WHERE order_id >= 99990000;
+SELECT COUNT(*) AS should_be_zero FROM bench_shard_transactions WHERE txn_id >= 99990000;
+
+-- 5.3 跨节点 Join + 数据倾斜场景
+-- 使用 WHERE 条件使大部分数据落在单个 DN (模拟倾斜)
+\echo 'Q22: Hash × Hash Join + 数据倾斜 (模拟热点)'
+EXPLAIN ANALYZE
+SELECT o.order_id, o.price, p.name, p.category
+FROM bench_hash_orders o
+JOIN bench_modulo_products p ON o.product_id = p.product_id
+WHERE o.customer_id BETWEEN 1 AND 50  -- 倾斜：只查少量客户，大部分在同一 DN
+LIMIT 100;
+
+-- 5.4 长事务 + GTM 压力测试
+\echo 'Q23: 长事务 (多语句 2PC，GTM 压力)'
+BEGIN;
+UPDATE bench_hash_orders SET status = 'processing' WHERE order_id BETWEEN 1 AND 100;
+UPDATE bench_hash_orders SET status = 'shipped' WHERE order_id BETWEEN 101 AND 200;
+INSERT INTO bench_hash_logs (service, level, message, host)
+VALUES ('order-service', 'INFO', 'Batch update: 200 orders processed', 'host-1');
+COMMIT;
+
+\echo '✅ Benchmark queries complete (including 2PC and skew tests). See 04_pgbench_scripts.sh for concurrency tests.'

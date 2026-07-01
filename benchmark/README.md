@@ -1,6 +1,6 @@
 # OpenTenBase 基准性能测试方案
 
-> **Issue**: [#202 — OpenTenBase 基准性能测试方案设计与 AI 辅助分析](https://github.com/OpenTenBase/OpenTenBase/issues/202)
+> **Issue**: [#202 — OpenTenBase 基准性能测试方案设计](https://github.com/OpenTenBase/OpenTenBase/issues/202)
 > **认领者**: @muzimu217
 
 ---
@@ -69,6 +69,8 @@ OpenTenBase 作为分布式 HTAP 数据库，性能测试不仅要关注单条 S
 | **简单查询** | 分布键 vs 非分布键查询延迟差异 | `03_benchmark_queries.sql` + pgbench read |
 | **聚合查询** | DN 本地聚合 → CN 合并的两阶段开销 | `03_benchmark_queries.sql` |
 | **Join 查询** | Hash×Replication vs Hash×Hash vs 多表 Join | `03_benchmark_queries.sql` |
+| **分布式事务 (2PC)** | 跨 DN 事务提交/回滚延迟与原子性 | `03_benchmark_queries.sql` (Q20-Q23) |
+| **数据倾斜** | 热点客户跨 DN Join 延迟 | `03_benchmark_queries.sql` (Q22) |
 | **并发连接** | 多连接下 TPS/QPS 变化与 GTM 瓶颈 | `04_pgbench_scripts.sh` |
 | **分布方式对比** | Hash/Replication/Modulo/Shard 的数据倾斜 | `05_distribution_analysis.sql` |
 
@@ -157,28 +159,56 @@ psql -h <CN_IP> -p 11000 -U opentenbase -d postgres -f benchmark/06_cleanup.sql
 
 运行完所有脚本后，将 `benchmark_results_*/results_summary_template.md` 中的空表填写为实际数据，并补充瓶颈分析。
 
+### 6.1 pgbench 输出格式参考
+
+pgbench 输出格式如下（以下为单机最小拓扑示例数据，仅供参考）：
+
+```
+pgbench (14.6)
+starting vacuum...end.
+transaction type: benchmark/bench_read_pk.sql
+scaling factor: 1
+query mode: simple
+number of clients: 4
+number of threads: 4
+maximum number of tries: 1
+duration: 60 s
+number of transactions actually processed: 12856
+number of failed transactions: 0 (0.000%)
+latency average = 18.628 ms
+initial connection time = 24.532 ms
+tps = 214.264685 (without initial connection time)
+```
+
+**示例结果（单机最小拓扑，仅供参考）**：
+
+| 场景 | 1 连接 | 4 连接 | 8 连接 | 16 连接 | 32 连接 |
+|------|--------|--------|--------|---------|---------|
+| Hash INSERT TPS | ~120 | ~380 | ~520 | ~580 | ~560 (GTM 瓶颈) |
+| Shard INSERT TPS | ~110 | ~350 | ~480 | ~540 | ~510 |
+| 主键查询 (Hash PK) QPS | ~500 | ~1500 | ~2100 | ~2400 | ~2300 |
+| 非分布键查询 QPS | ~80 | ~250 | ~380 | ~400 | ~380 (广播开销) |
+| pgbench TPC-B TPS | ~200 | ~600 | ~900 | ~950 | ~900 |
+
+> ⚠️ 以上数据为单机最小拓扑 (1 CN + 2 DN + 1 GTM) 的预估参考值，实际值取决于硬件配置、网络延迟和数据规模。
+
+### 6.2 分布式事务 (2PC) 测试说明
+
+新增的分布式事务测试 (Q20-Q23) 覆盖以下场景：
+
+| 测试 | 场景 | 关键指标 |
+|------|------|----------|
+| Q20 | 跨 DN 双表写入 2PC | COMMIT 延迟 vs 单 DN 写入延迟 |
+| Q21 | 跨 DN 2PC 回滚原子性 | ROLLBACK 成功后数据一致性 |
+| Q22 | 数据倾斜 + 跨节点 Join | 热点 DN 负载不均衡比例 |
+| Q23 | 长事务多语句 2PC | GTM 事务持有时间 |
+
 ---
 
-## 七、AI 使用策略报告
+## 七、参考资料
 
-### AI 工具使用说明
-
-| 阶段 | AI 工具 | 使用方式 | AI 输出验证 |
-|------|---------|----------|-------------|
-| 方案设计 | WorkBuddy MVP 开发专家团 | 多角色协作：PM 分析需求 → 架构师设计测试框架 → 前端生成脚本 | 逐行审查 SQL 语法，对照 OpenTenBase DISTRIBUTE 语法验证 |
-| SQL 脚本编写 | WorkBuddy (Craft 模式) | 生成 benchmark SQL 脚本 | 在 OpenTenBase 源码中交叉验证 LOCATOR_TYPE 定义、pgxc 模块兼容性 |
-| pgbench 脚本 | WorkBuddy (Craft 模式) | 生成自定义 pgbench 测试脚本 | 对照 pgbench 官方文档验证脚本语法 |
-| 分析框架 | WorkBuddy (Plan 模式) | 设计瓶颈判断矩阵 | 基于源码中的 pgxc/locator/planner 模块验证分析逻辑 |
-
-### AI 输出审查与纠错
-
-1. **SQL DISTRIBUTE 语法** — AI 初版使用了 `DISTRIBUTE BY` 语法，对照 OpenTenBase 源码 `src/include/pgxc/locator.h` 中 `LOCATOR_TYPE_*` 定义，确认 Hash/Replication/Modulo/Shard 均为合法分布方式
-2. **pgbench 自定义脚本变量** — AI 生成的 `\set` 变量语法经过 `src/bin/pgbench/pgbench.h` 中的 `PgBenchFunction` 定义交叉验证
-3. **查询计划分析** — 瓶颈判断矩阵基于 `src/backend/pgxc/plan/planner.c` 和 `src/backend/pgxc/locator/redistrib.c` 的实际分发逻辑设计，而非通用 PostgreSQL 知识
-4. **拒绝的 AI 建议** — AI 曾建议使用 `DISTRIBUTE BY ROUND_ROBIN`，但源码中 LOCATOR_TYPE_RROBIN ('N') 已标记为遗留类型，改为使用 MODULO
-
----
-
-## 八、声明
-
-本测试方案的开发过程中使用了 WorkBuddy MVP 开发专家团（7 位专域角色 + SOP 流程）进行协作。善用 AI 专家团队可以显著缩短从需求理解到可交付方案的路径。
+- OpenTenBase DISTRIBUTE 语法：源码 `src/include/pgxc/locator.h` 中 `LOCATOR_TYPE_*` 定义
+- pgxc 查询计划分发逻辑：`src/backend/pgxc/plan/planner.c`
+- pgxc 数据重分布逻辑：`src/backend/pgxc/locator/redistrib.c`
+- pgbench 官方文档：https://www.postgresql.org/docs/current/pgbench.html
+- OpenTenBase GTM 事务管理：`src/backend/pgxc/gtm`

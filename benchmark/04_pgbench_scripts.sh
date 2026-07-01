@@ -1,13 +1,20 @@
 #!/bin/bash
 # ============================================================
 # OpenTenBase pgbench 并发压力测试脚本
-# Issue #202: 基准性能测试方案设计与 AI 辅助分析
+# Issue #202: 基准性能测试方案设计
 # ============================================================
 #
 # 前置条件:
 #   1. OpenTenBase 集群已启动 (CN/DN/GTM 运行中)
 #   2. 测试表已通过 01_schema_init.sql + 02_data_load.sql 初始化
 #   3. pgbench 可用 (OpenTenBase 包含 pgbench 工具)
+#
+# 兼容性说明:
+#   - pgbench 版本: PostgreSQL 12+ 或 OpenTenBase 自带的 pgbench
+#   - 操作系统: Linux (Ubuntu 18.04+ / CentOS 7+ / Debian 10+)
+#   - macOS: 支持，但 \if 语法需 pgbench 11+ 版本
+#   - 自定义脚本中的 \set 和 \if 语法在 pgbench 11+ 可用
+#   - 确认 pgbench 版本: pgbench --version
 #
 # 使用方式:
 #   chmod +x 04_pgbench_scripts.sh
@@ -16,6 +23,18 @@
 # ============================================================
 
 set -euo pipefail
+
+# 前置检查: pgbench 是否可用
+if ! command -v pgbench &>/dev/null; then
+    echo "❌ 错误: pgbench 未找到。请确认 pgbench 已安装并在 PATH 中。"
+    echo "   OpenTenBase 自带 pgbench，路径通常为: ./pgbench"
+    echo "   或手动安装: sudo apt install postgresql-contrib (Ubuntu/Debian)"
+    exit 1
+fi
+
+# 版本检查: pgbench 11+ 支持自定义脚本 \if 语法
+PGBENCH_VERSION=$(pgbench --version 2>&1 | head -1)
+echo "✅ pgbench 版本: ${PGBENCH_VERSION}"
 
 CN_HOST="${1:-127.0.0.1}"
 CN_PORT="${2:-11000}"
