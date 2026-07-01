@@ -2,12 +2,42 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: opentenbaseclusters.opentenbase.io
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.14.0
 spec:
   group: opentenbase.io
   versions:
     - name: v1alpha1
       served: true
       storage: true
+      # K8s 1.28+ requires subresources for status tracking
+      subresources:
+        status: {}
+      # Additional printer columns for kubectl get otbc
+      additionalPrinterColumns:
+        - name: Type
+          type: string
+          jsonPath: .spec.distributedType
+          description: "Cluster deployment mode"
+        - name: GTM
+          type: string
+          jsonPath: .status.gtmPhase
+          description: "GTM deployment phase"
+        - name: CN
+          type: integer
+          jsonPath: .spec.coordinators.replicas
+          description: "Coordinator replicas"
+        - name: DN
+          type: integer
+          jsonPath: .spec.datanodes.replicas
+          description: "DataNode replicas"
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+          description: "Cluster phase"
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
       schema:
         openAPIV3Schema:
           type: object
@@ -214,3 +244,7 @@ spec:
     categories:
       - database
       - opentenbase
+  # K8s 1.28+ required for: status subresource, additionalPrinterColumns,
+  # CEL validation (future), and Gateway API integration (future)
+  conversion:
+    strategy: None

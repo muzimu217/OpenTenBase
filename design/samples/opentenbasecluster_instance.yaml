@@ -3,6 +3,10 @@ kind: OpenTenBaseCluster
 metadata:
   name: demo-cluster
   namespace: opentenbase
+  labels:
+    app.kubernetes.io/name: opentenbase
+    app.kubernetes.io/instance: demo-cluster
+    app.kubernetes.io/managed-by: opentenbase-operator
 spec:
   distributedType: distributed
   image: "opentenbase/opentenbase:v5.21.8"
