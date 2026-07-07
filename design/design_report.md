@@ -136,6 +136,21 @@ spec:
 4. **InitContainer 做初始化** — initdb、恢复、join existing cluster
 5. **Readinessprobe 检查 Patroni 状态** — 确保只有 ready 的 Pod 被加入 Service
 
+### 3.3 KubeBlocks 对比分析（多引擎管理框架）
+
+KubeBlocks 是一个多数据库引擎管理平台，与上述单机 PG Operator 定位不同：
+
+| 维度 | KubeBlocks | CloudNativePG | OpenTenBase Operator（本方案） |
+|------|-----------|---------------|-------------------------------|
+| **定位** | 多引擎统一管理（MySQL/PG/Redis/Kafka…） | 单引擎 PG 专用 | OpenTenBase 分布式专用 |
+| **抽象层** | Addon + ClusterDefinition → 隐藏引擎差异 | Cluster CRD 直接映射 PG | OpenTenBaseCluster CRD 映射 GTM/DN/CN |
+| **多角色编排** | 通过 ComponentDefinition 拼装 | 不适用（单角色） | GTM→DN→CN 严格有序 |
+| **分布式事务** | 不涉及（依赖引擎自身） | 不适用 | GTM 全局事务管理是核心 |
+| **HA 方案** | 引擎特定（Patroni/MHA/Orchestrator） | Patroni 内嵌 | GTM 主从 + DN 流复制 |
+| **学习曲线** | 高（Addon 体系复杂） | 中 | 中（CRD 直观） |
+
+**关键差异**：KubeBlocks 的 Addon 抽象层为多引擎通用而设计，但 OpenTenBase 的 GTM→DN→CN 严格有序启动依赖、跨节点事务注册流程无法通过 KubeBlocks 的通用 Component 拼装表达。本方案选择专用 Operator 路线，在 CRD 层面直接建模三角色依赖关系，避免抽象层泄漏。
+
 ---
 
 ## 4. 关键差异分析

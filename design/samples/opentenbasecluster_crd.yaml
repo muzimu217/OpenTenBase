@@ -97,7 +97,7 @@ spec:
                               type: object
                               properties:
                                 cpu: { type: string }
-                            memory: { type: string }
+                                memory: { type: string }
                         storage:
                           type: object
                           properties:
@@ -196,7 +196,7 @@ spec:
               properties:
                 phase:
                   type: string
-                  enum: ["Initializing", "GTMReady", "DNReady", "CNReady", "Running", "Failed", "Expanding"]
+                  enum: ["Initializing", "GTMReady", "DNReady", "Running", "Failed", "Expanding"]
                 gtmPhase:
                   type: string
                   description: "Current GTM deployment phase"
