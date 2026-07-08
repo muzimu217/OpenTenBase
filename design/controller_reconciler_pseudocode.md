@@ -1,7 +1,21 @@
 # OpenTenBase Operator Controller 伪代码
 
 > 此文档描述 Operator 控制器的核心 Reconciler 逻辑。
-> 实际实现时可选择 Go (Kubebuilder/controller-runtime) 或 Python ( kopf )。
+> 实际实现时可选择 Go (Kubebuilder/controller-runtime) 或 Python (kopf)。
+
+## 与 CNPG Reconciler 的对比
+
+> 本节说明为什么自建 Reconciler 而非复用 CNPG 的，呼应 §4.4 的技术论证。
+
+| 维度 | CNPG Reconciler | OpenTenBase Reconciler |
+|------|----------------|------------------------|
+| 角色 | 1 个（single PG instance） | 3 个（GTM + CN + DN） |
+| 阶段数 | 2（primary → replica） | 5（Initializing → GTMReady → DNReady → Running → Expanding） |
+| 启动依赖 | 无（单节点 bootstrap） | 严格顺序（GTM → DN → CN） |
+| 节点注册 | 无（Patroni 自动发现） | 需 `CREATE NODE` SQL 注册 |
+| failover | Patroni DCS 选举 | GTM standby promote + CN/DN 重连 |
+
+CNPG 的 Reconciler 只需管理一个 StatefulSet + 一个 primary 选举，而 OpenTenBase 需要 3 个 StatefulSet + 跨组件注册编排 + GTM failover。复用 CNPG Reconciler 的收益为零——所有核心逻辑需要重写。
 
 ## 核心设计原则
 

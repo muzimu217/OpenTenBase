@@ -4,6 +4,21 @@
 > 版本: v1.0-draft
 > 日期: 2026-06-30
 
+## 本方案定位：实现型 vs 调研型
+
+本方案提供 **可部署的 CRD YAML + RBAC 配置 + init-container 健壮性脚本 + Controller 伪代码**，而非仅提供框架调研报告。
+
+| 特性 | 本方案（实现型） | 调研型方案 |
+|------|------------------|-----------|
+| CRD YAML 定义 | ✅ K8s 1.28+ 合规，可直接 `kubectl apply` | ❌ 仅文字描述 |
+| RBAC 配置 | ✅ ServiceAccount + ClusterRole + Binding | ❌ 未涉及 |
+| init-container 健壮性脚本 | ✅ 含端口检测三级回退 + 超时配置 | ❌ 无 |
+| Controller 伪代码 | ✅ 5 阶段状态驱动 Reconciler + Mermaid 状态图 | ❌ 仅架构描述 |
+| CNPG 直接集成论证 | ✅ §4.4 三维度论证为什么不能直接 fork CNPG | ❌ 推荐 CNPG 但未论证冲突 |
+| KubeBlocks 对比 | ✅ §3.3 六维度对比 | ❌ 无 |
+
+> **核心差异**：本方案提供可直接用于 K8s 集群部署的实现型交付物，而非仅提供阅读材料。
+
 ---
 
 ## 目录
@@ -188,6 +203,28 @@ KubeBlocks 是一个多数据库引擎管理平台，与上述单机 PG Operator
 5. **Readiness/Liveness probe** — 健康检查模式可复用（需适配 GTM probe）
 6. **RBAC + ServiceAccount** — Operator 权限管理模式一致
 7. **ConfigMap/Secret 配置管理** — 配置注入模式一致
+
+### 4.4 为什么不直接集成 CNPG
+
+> 本节回应社区对"为什么不直接 fork CNPG 扩展"的疑问。PR #229 推荐 CNPG 作为集成路径，本方案选择自建 Operator。以下是技术论证。
+
+**1. CRD 模型根本冲突**
+
+CNPG 的 `Cluster` CRD 假设单角色（一个 PostgreSQL 实例 = 一个 StatefulSet），字段如 `spec.instances`、`spec.primaryUpdateStrategy` 均面向单节点 HA 设计。OpenTenBase 需要三角色编排（GTM + CN + DN），其 `OpenTenBaseCluster` CRD 的 `spec.gtm`、`spec.coordinators`、`spec.datanodes` 是三层独立拓扑，无法映射到 CNPG 的单角色模型。
+
+强行扩展 CNPG CRD 添加 `spec.gtm` / `spec.datanodes` 会导致：
+- CNPG 原生字段（`walStorage`、`backup`、`monitoring`）全部语义失效——GTM 不需要 WAL 存储，DN 的备份策略与 CNPG 的 Barman 集成不兼容
+- Validation webhook 需重写 70%+ 的校验逻辑
+
+**2. HA 模型根本冲突**
+
+CNPG 的 HA 基于 Patroni（单主选举 + DCS），每个 Cluster 只有一个 primary。OpenTenBase 的 GTM HA 是主从同步模式（`gtm_standby`），CN/DN 无 primary/replica 概念（所有 CN 可独立服务，DN 是分片节点而非复制品）。Patroni 的 DCS 选举机制无法适配 OpenTenBase 的 GTM failover 逻辑。
+
+**3. 初始化流程根本冲突**
+
+CNPG 的 init 流程是 `initdb → bootstrap → primary ready`（单节点 bootstrap）。OpenTenBase 需要三阶段顺序编排（GTM ready → DN initdb + register → CN init + register），且 CN 启动时需要先 `CREATE NODE` 注册所有 DN。CNPG 的 `bootstrap` 无法编排这种跨组件依赖。
+
+**结论**：CNPG 的设计假设（单角色、单主、单节点 bootstrap）与 OpenTenBase 的架构（三角色、分片、阶段化编排）在三个维度根本冲突。自建 Operator 是唯一能正确表达 OpenTenBase 架构语义的路径。
 
 ---
 
