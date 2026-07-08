@@ -18,6 +18,24 @@ OpenTenBase 作为分布式 HTAP 数据库，性能测试不仅要关注单条 S
 
 ---
 
+## 本方案定位：实操型 vs 文档型
+
+本方案提供 **可直接运行** 的测试交付物（5 个 .sql + 1 个 .sh），而非纯文档指南。
+
+| 特性 | 本方案（实操型） | 纯文档型方案 |
+|------|------------------|-------------|
+| 可执行 SQL 脚本 | ✅ 5 个 .sql 文件，`psql -f` 即可运行 | ❌ 无 |
+| pgbench 自动化脚本 | ✅ 含错误容错和结果模板 | ❌ 仅列出工具名 |
+| 多种分布方式覆盖 | ✅ Hash/Replication/Modulo/Shard 均建表测试 | ❌ 无建表细节 |
+| 分布式事务 (2PC) 测试 | ✅ 含提交/回滚原子性验证 (Q20-Q23) | ❌ 未涉及 |
+| 瓶颈判断矩阵 | ✅ 症状→根因→验证方法（基于源码交叉验证） | ❌ 无结构化分析 |
+| 一键运行 | ✅ README 6 步命令 + `run_all_benchmarks.sh` | ❌ 需用户自行构建 |
+| 源码交叉验证 | ✅ locator.h/planner.c/redistrib.c | ❌ 通用知识 |
+
+> **核心差异**：本方案每个文件都可在 OpenTenBase 集群上直接运行产生性能数据，而非仅提供阅读材料。
+
+---
+
 ## 二、测试环境规范
 
 ### 2.1 硬件环境
@@ -202,6 +220,39 @@ tps = 214.264685 (without initial connection time)
 | Q21 | 跨 DN 2PC 回滚原子性 | ROLLBACK 成功后数据一致性 |
 | Q22 | 数据倾斜 + 跨节点 Join | 热点 DN 负载不均衡比例 |
 | Q23 | 长事务多语句 2PC | GTM 事务持有时间 |
+
+### 6.3 2PC 预期输出示例
+
+Q20 (跨 DN 双表写入 2PC) 预期输出：
+
+```
+QUERY PLAN
+------------------------------------------------------------------------------
+ Insert on bench_hash_orders  (cost=0.00..0.01 rows=1 width=...)
+   ->  Result  (cost=0.00..0.01 rows=1 width=...)
+         One-Time Filter: (insertion_location = dn_1)
+ Planning Time: 0.xxx ms
+ Execution Time: x.xxx ms
+
+QUERY PLAN
+------------------------------------------------------------------------------
+ Insert on bench_shard_transactions  (cost=0.00..0.01 rows=1 width=...)
+   ->  Result  (cost=0.00..0.01 rows=1 width=...)
+         One-Time Filter: (insertion_location = dn_2)
+ Planning Time: 0.xxx ms
+ Execution Time: x.xxx ms
+```
+
+Q21 (2PC 回滚原子性验证) 预期结果：
+
+```
+ should_be_zero
+----------------
+              0
+(1 row)
+```
+
+> 若 `should_be_zero` 不为 0，说明 2PC 回滚存在原子性问题，需排查 DN 事务状态。
 
 ---
 

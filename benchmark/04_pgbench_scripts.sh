@@ -16,6 +16,28 @@
 #   - 自定义脚本中的 \set 和 \if 语法在 pgbench 11+ 可用
 #   - 确认 pgbench 版本: pgbench --version
 #
+# 版本兼容矩阵:
+#   ┌──────────────────┬──────────┬──────────────────┐
+#   │ pgbench 版本      │ 兼容性    │ 备注              │
+#   ├──────────────────┼──────────┼──────────────────┤
+#   │ OpenTenBase 内置  │ ✅ 推荐   │ 最稳定             │
+#   │ PostgreSQL 16     │ ✅       │ 完全兼容           │
+#   │ PostgreSQL 15     │ ✅       │ 完全兼容           │
+#   │ PostgreSQL 14     │ ✅       │ 完全兼容           │
+#   │ PostgreSQL 13     │ ✅       │ 完全兼容           │
+#   │ PostgreSQL 12     │ ✅       │ 完全兼容           │
+#   │ PostgreSQL 11     │ ⚠️       │ \if 语法可用       │
+#   │ ≤ PG 10          │ ❌       │ 不支持 \if 语法    │
+#   └──────────────────┴──────────┴──────────────────┘
+#
+# 预期输出示例 (Hash INSERT, 4 连接, 单机最小拓扑):
+#   transaction type: benchmark/bench_hash_insert.sql
+#   number of clients: 4
+#   duration: 60 s
+#   tps = 380.123456 (without initial connection time)
+#   latency average = 10.523 ms
+#   若偏差 > 50%，请检查磁盘 I/O 和网络延迟
+#
 # 使用方式:
 #   chmod +x 04_pgbench_scripts.sh
 #   ./04_pgbench_scripts.sh <CN_HOST> <CN_PORT> <DB_USER>
