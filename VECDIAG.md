@@ -15,8 +15,7 @@
 ## 审查员：拿到仓库后的 10 分钟核验路径
 
 前提：一台 CentOS 7 或 Rocky 8 机器（root 或 sudo），能访问 github.com。
-仓库当前为 **private**——审查者需要先被加为 collaborator（Settings → Collaborators），
-或等提交窗口公开后匿名访问。
+仓库为**公开**仓库（2026-09-07 起），任何人可匿名 clone，无需授权。
 
 ```bash
 git clone -b feature/vector-build-diagnostics git@github.com:muzimu217/OpenTenBase.git
