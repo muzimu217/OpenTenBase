@@ -27,7 +27,7 @@
 | 依赖 | 说明 |
 |------|------|
 | pgsql-http 扩展 | `opentenbase_ai` 声明 `requires = 'http'`，必须先安装（见 `contrib/pgsql-http/`，其依赖 libcurl 开发头） |
-| 网络出口 | 数据库进程（所有 CN 节点）需要能够访问模型服务端点 |
+| 网络出口 | 数据库进程（所有可能执行相关查询的节点，包括 CN 与 DN）需要能够访问模型服务端点 |
 | 模型服务 | 任一 OpenAI 协议兼容端点及对应的 API Key |
 
 ## 编译安装
@@ -175,7 +175,7 @@ LOAD 'opentenbase_ai';
 SET ai.completion_model = 'deepseek-chat';
 ```
 
-模块未加载时执行 `SET ai.completion_model = ...` 会报 `unrecognized configuration parameter` 错误。另一种规避方式是始终显式传入 `model_name` 参数，完全不依赖 GUC。
+需要说明的是：即使模块未加载，`SET ai.completion_model = ...` 也**不会**报 `unrecognized configuration parameter` 错误——本内核对带前缀（含 `.`）的自定义 GUC 名会先创建占位符变量（placeholder），`current_setting` 同样能读到该值，因此各高层函数在此场景下仍可取到默认模型。但占位符不具备正式定义的参数语义（`SHOW`/`pg_settings` 展示、重启后从配置文件恢复等），生产环境仍建议按上文通过 `LOAD` 或 `shared_preload_libraries` 正式加载模块。若完全不使用 GUC，也可以始终显式传入 `model_name` 参数。
 
 ## 使用示例
 
@@ -212,7 +212,7 @@ make -C contrib/opentenbase_ai installcheck   # 需已启动并安装扩展的�
 ## 注意事项
 
 1. **API Key 明文存储**：`token` 以明文写入 `public.ai_model_list.request_header`，而该表默认 `GRANT SELECT ... TO PUBLIC`，所有用户可读。生产环境建议：通过 revoke 收紧读权限，或让 `uri` 指向内部代理网关、由网关持有真实 Key。
-2. **网络出口**：HTTP 请求由数据库进程直接发起，请确保每个 CN 节点到模型端点的网络与防火墙放行，并评估外部调用对查询延迟的影响。
+2. **网络出口**：HTTP 请求由数据库进程直接发起，请确保每个可能执行相关查询的节点（CN 与 DN）到模型端点的网络与防火墙放行，并评估外部调用对查询延迟的影响。
 3. **错误传播**：HTTP 非 200、模型未注册、`json_path` 提取失败均以异常抛出，调用方需在事务/应用层处理。
 4. **自定义端点**：使用非 OpenAI 协议的服务时，用 `ai.add_model` 自行书写 `json_path`，模板中 `%s` 位置为原始响应体文本。
 
