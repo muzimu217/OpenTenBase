@@ -51,6 +51,16 @@ static int fn_fail_cn_count = 0;
 
 #define Socket(port) (port).fdsock
 
+/*
+ * Upper bound on the connect() retries performed by a flush-path reconnect
+ * before it gives up and reports failure. With the exponential backoff used
+ * below this spans roughly one and a half seconds: long enough to ride out a
+ * forward receiver restart, short enough that a peer that is really down
+ * cannot stall the sender loop indefinitely. Startup (InitForwardConns)
+ * passes -1 instead, since a node that is still coming up must be waited for.
+ */
+#define FN_RECONNECT_MAX_RETRIES	4
+
 static int g_epollfd = 0;
 static int maxfd;
 static struct epoll_event *events;
@@ -365,10 +375,14 @@ senderFunc(void *arg)
 }
 
 /*
- * Connect to remote forward receiver listening on specified port
+ * Connect to remote forward receiver listening on specified port.
+ *
+ * max_retries bounds how many times a failed connect() is retried before
+ * STATUS_ERROR is returned; -1 keeps retrying until shutdown or a pool
+ * reload is requested.
  */
 static int
-fnconn_connect_remote(ForwardConn *conn, bool iscoord)
+fnconn_connect_remote(ForwardConn *conn, int max_retries)
 {
 	int retry_times = 0;
 	ForwardPort *port = conn->port;
@@ -517,7 +531,10 @@ retry:
 			}
 			else
 			{
-				/* log per 5 seconds */
+				/*
+				 * Log the first failure and then periodically (every 50
+				 * retries), so a peer that stays down does not flood the log.
+				 */
 				if (retry_times % 50 == 0)
 				{
 					/* otherwise, trouble */
@@ -534,14 +551,18 @@ retry:
 						conn->node.nodeforwardport);
 				}
 
-				if (iscoord && retry_times > 3)
+				if (max_retries >= 0 && retry_times >= max_retries)
 					return STATUS_ERROR;
-				
+
 				/*
 				 * FNREFACTOR TODO
 				 * maybe we haven't startup the node yet, just retry for now..
+				 *
+				 * Back off between attempts: 100 ms doubling, capped at 1 s,
+				 * so a peer that is slow to come back is not hammered while a
+				 * recovered one is still noticed within a second.
 				 */
-				pg_usleep(100000L);
+				pg_usleep((long) Min(100 * (1 << Min(retry_times, 4)), 1000) * 1000L);
 				retry_times++;
 				goto retry;
 			}
@@ -758,7 +779,7 @@ InitForwardConns(void)
 
 		fn_cn_conns[i].port = palloc0(sizeof(ForwardPort));
 		/* port->fdsock and addr will be filled in fnconn_connect_remote */
-		if (fnconn_connect_remote(&fn_cn_conns[i], true) == STATUS_OK)
+		if (fnconn_connect_remote(&fn_cn_conns[i], FN_RECONNECT_MAX_RETRIES) == STATUS_OK)
 		{
 			add_connection_to_checker(&fn_cn_conns[i]);
 			fn_cn_conns[i].buffer = palloc0(fn_send_bulk_bytes);
@@ -790,7 +811,7 @@ InitForwardConns(void)
 
 		fn_dn_conns[i].port = palloc0(sizeof(ForwardPort));
 		/* port->fdsock and addr will be filled in fnconn_connect_remote */
-		if (fnconn_connect_remote(&fn_dn_conns[i], false) == STATUS_OK)
+		if (fnconn_connect_remote(&fn_dn_conns[i], -1) == STATUS_OK)
 		{
 			add_connection_to_checker(&fn_dn_conns[i]);
 			fn_dn_conns[i].buffer = palloc0(fn_send_bulk_bytes);
@@ -919,6 +940,43 @@ SendFnPage(FnPage page, uint16 nodeid, FnBufferDesc *buf, pg_atomic_uint32 *num_
 		}
 
 		conn = &fn_dn_conns[nodeid];
+
+		/*
+		 * Mirror the CN-side handling: when the forward socket to a DN was
+		 * marked failed (receiver restarted, transient network error, ...),
+		 * try to re-establish it before giving up. Without this the stale
+		 * socket makes every subsequent flush fail, and each failure
+		 * terminates all backends holding a local_fid, so one transient TCP
+		 * error kills the whole distributed workload until restart.
+		 *
+		 * conn->fail is only ever set by InitForwardConns(), and only on the
+		 * branch where fnconn_connect_remote() returned STATUS_ERROR -- the
+		 * same branch that skips the buffer allocation. conn->buffer is
+		 * therefore still NULL here, so the allocation below completes the
+		 * initialization the failed connect skipped rather than replacing a
+		 * live buffer; it matches the CN-side reconnect above exactly.
+		 *
+		 * The reconnect is bounded and backed off (FN_RECONNECT_MAX_RETRIES),
+		 * so a peer that is really down fails the flush after a short delay
+		 * instead of stalling the sender loop indefinitely.
+		 */
+		if (conn->fail)
+		{
+			int	fn_send_bulk_bytes = 1024 * FnSendBulkSize;
+
+			if (fnconn_connect_remote(conn, FN_RECONNECT_MAX_RETRIES) == STATUS_OK)
+			{
+				conn->fail = false;
+				add_connection_to_checker(conn);
+				conn->buffer = MemoryContextAlloc(TopMemoryContext, fn_send_bulk_bytes);
+			}
+			else
+			{
+				elog(WARNING, "[SendFnPage] failed to reconnect to forward receiver, name=%s",
+					 NameStr(conn->node.nodename));
+				return false;
+			}
+		}
 	}
 
 	if (send_to_cn && conn->fail)
@@ -926,7 +984,7 @@ SendFnPage(FnPage page, uint16 nodeid, FnBufferDesc *buf, pg_atomic_uint32 *num_
 		int fn_send_bulk_bytes = 1024 * FnSendBulkSize;
 
 		/* port->fdsock and addr will be filled in fnconn_connect_remote */
-		if (fnconn_connect_remote(conn, true) == STATUS_OK)
+		if (fnconn_connect_remote(conn, FN_RECONNECT_MAX_RETRIES) == STATUS_OK)
 		{
 			conn->fail = false;
 			fn_fail_cn_count--;
