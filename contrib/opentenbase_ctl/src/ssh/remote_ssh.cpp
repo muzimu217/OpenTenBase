@@ -425,26 +425,94 @@ std::string string_to_base64(const std::string& input) {
 }
 
 
+/*
+ * Return true when the captured listening table contains a socket bound to
+ * "port". Only rows that carry the LISTEN state are inspected, so any stderr
+ * text an otherwise successful SSH session may have merged into the captured
+ * output cannot be mistaken for a listener. Inside a row the port must be
+ * preceded by ':' or '.' and followed by a non-digit, which covers every
+ * rendering seen in practice -- "0.0.0.0:11000", "*:11000", "[::]:11000",
+ * "[::1]:11000", netstat's ":::11000" and BSD-style "127.0.0.1.11000" --
+ * while a longer port that merely starts with the same digits (":110000")
+ * is not a match.
+ */
+static bool
+listening_table_contains_port(const std::string& table, int port) {
+    const std::string digits = std::to_string(port);
+    size_t line_start = 0;
+
+    while (line_start < table.size()) {
+        size_t line_end = table.find('\n', line_start);
+        if (line_end == std::string::npos) {
+            line_end = table.size();
+        }
+
+        std::string line = table.substr(line_start, line_end - line_start);
+        line_start = line_end + 1;
+
+        if (line.find("LISTEN") == std::string::npos) {
+            continue;
+        }
+
+        size_t pos = 0;
+        while ((pos = line.find(digits, pos)) != std::string::npos) {
+            bool separated_before = pos > 0 && (line[pos - 1] == ':' || line[pos - 1] == '.');
+            size_t end = pos + digits.size();
+            bool separated_after = end >= line.size() ||
+                                   line[end] < '0' || line[end] > '9';
+
+            if (separated_before && separated_after) {
+                return true;
+            }
+
+            pos = end;
+        }
+    }
+
+    return false;
+}
+
 // Check if port is available
 int 
 check_port_available(const char *ip, int port, const char *username, const char *password, int ssh_port) {
-    std::string cmd = "export PATH=/usr/local/bin:/usr/bin:/usr/sbin:$PATH && ss -tln | grep -q ':" + std::to_string(port) + "'";
+    // Capture the whole listening table and decide locally. The old
+    // "ss -tln | grep -q ':<port>'" could not distinguish a failed SSH
+    // transport from a free port: grep -q prints nothing in both cases, so
+    // the decision depended on whatever the SSH session leaked into the
+    // captured output (a stale known_hosts entry or a fresh-host "Permanently
+    // added" warning made every port look occupied). Discard stderr on the
+    // remote side and print an end marker only when the command really ran,
+    // so a missing marker identifies an SSH transport failure.
+    std::string cmd = "export PATH=/usr/local/bin:/usr/bin:/usr/sbin:$PATH && "
+                      "(ss -tlnH 2>/dev/null || netstat -tln 2>/dev/null) ; "
+                      "echo PORTCHECK_DONE";
     std::string result;
     
     int ret = remote_ssh_exec(ip, ssh_port, username, password, cmd, result);
     
-    if (ret == 0) {
-        // Command executed successfully, check return value
-        if (result.empty()) {
-            // No port found, means port is available
-            return 0;
-        } else {
-            // Port found, means port is occupied
-            return 1;
-        }
-    } else {
+    if (ret != 0) {
         // Command execution failed
         LOG_ERROR_FMT("Failed to check port %d on %s: %s", port, ip, result.c_str());
         return -1;
     }
+
+    const std::string marker = "PORTCHECK_DONE";
+    size_t marker_pos = result.rfind(marker);
+
+    if (marker_pos == std::string::npos) {
+        // The remote shell never reported back: the SSH transport itself
+        // failed (unreachable host, bad credentials, stale known_hosts
+        // entry, ...). Report it instead of misreading it as port state.
+        LOG_ERROR_FMT("Failed to check port %d on %s: SSH command did not complete: %s",
+                      port, ip, result.c_str());
+        return -1;
+    }
+
+    if (listening_table_contains_port(result.substr(0, marker_pos), port)) {
+        // Port found, means port is occupied
+        return 1;
+    }
+
+    // No port found, means port is available
+    return 0;
 }
