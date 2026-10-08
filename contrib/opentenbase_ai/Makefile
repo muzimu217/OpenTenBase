@@ -5,7 +5,7 @@ DATA = opentenbase_ai--1.0.sql
 PGFILEDESC = "opentenbase_ai - opentenbase extension for AI"
 
 OBJS = ai.o
-REGRESS = opentenbase_ai
+REGRESS = opentenbase_ai ai_model_register_boundary
 EXTRA_INSTALL = contrib/pgsql-http
 
 ifdef USE_PGXS

@@ -137,11 +137,17 @@ CREATE OR REPLACE FUNCTION ai.add_model(
 DECLARE
     rows_affected integer;
 BEGIN
-    INSERT INTO public.ai_model_list VALUES(
-        model_name, model_provider, request_type, request_header, uri, 
-        content_type, default_args, json_path
-    );
-    
+    BEGIN
+        INSERT INTO public.ai_model_list VALUES(
+            model_name, model_provider, request_type, request_header, uri,
+            content_type, default_args, json_path
+        );
+    EXCEPTION
+        WHEN unique_violation THEN
+            RAISE EXCEPTION 'model "%" already exists; use ai.update_model to change it or ai.delete_model before re-registering', model_name
+                USING ERRCODE = 'unique_violation';
+    END;
+
     GET DIAGNOSTICS rows_affected = ROW_COUNT;
     RETURN rows_affected > 0;
 END;
